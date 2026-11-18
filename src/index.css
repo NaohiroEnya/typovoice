@@ -131,6 +131,21 @@ svg {
   opacity: 0;
 }
 
+/* What the voice did to the letters ("大きな声", ...), shown briefly with the caption. */
+#voice-tag {
+  margin: -6px 0 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #111;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#voice-tag:empty {
+  display: none;
+}
+
 #hint {
   margin: 0;
   font-size: 13px;
@@ -184,6 +199,14 @@ body.listening #mic {
 body.listening #mic-level {
   opacity: 0.35;
   animation: mic-breathe 1.4s ease-in-out infinite;
+}
+
+/* Once the live input level is known (--level, set by app.js), the halo follows the voice. */
+body.listening #mic[style*='--level'] #mic-level {
+  animation: none;
+  opacity: calc(0.25 + var(--level) * 0.5);
+  transform: scale(calc(1.05 + var(--level) * 0.55));
+  transition: transform 60ms linear;
 }
 
 @keyframes mic-breathe {

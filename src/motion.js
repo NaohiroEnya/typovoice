@@ -6,8 +6,9 @@
 import * as THREE from 'three'
 
 const INTRO_SECONDS = 0.4 // every placement / motion change pops the text in
-const FLOAT = {lift: 0.05, speed: 2}
-const POP_PERIOD = 1.2
+// Defaults; TYPO VOICE passes per-message `motionParams` derived from the voice (voice-style.js).
+const DEFAULT_PARAMS = {speed: 2, lift: 0.05, sway: 0.08, bounce: 0.15}
+const POP_PERIOD = 1.2 // at speed 2
 const DRAW = {reveal: 1.6, hold: 2.4, erase: 0.6}
 const NO_CLIP = 1e6
 const LEFT = new THREE.Vector3(-1, 0, 0)
@@ -21,14 +22,15 @@ const easeInOut = (x) => (x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2)
 const clamp01 = (x) => Math.min(1, Math.max(0, x))
 
 // Squash-and-stretch bounce: crouch, jump, land.
-const applyPop = (node, t) => {
-  const p = (t % POP_PERIOD) / POP_PERIOD
+const applyPop = (node, t, {speed, bounce}) => {
+  const period = (POP_PERIOD * 2) / speed
+  const p = (t % period) / period
   if (p < 0.12) {
     const k = Math.sin((p / 0.12) * Math.PI)
     node.scale.set(1 + 0.08 * k, 1 - 0.12 * k, 1)
   } else if (p < 0.5) {
     const k = Math.sin(((p - 0.12) / 0.38) * Math.PI)
-    node.position.y = 0.15 * k
+    node.position.y = bounce * k
     node.scale.set(1 - 0.03 * k, 1 + 0.06 * k, 1)
   } else if (p < 0.62) {
     const k = Math.sin(((p - 0.5) / 0.12) * Math.PI)
@@ -36,10 +38,11 @@ const applyPop = (node, t) => {
   }
 }
 
-const applyFloat = (node, t) => {
-  node.position.y = FLOAT.lift * (1 + Math.sin(t * FLOAT.speed))
-  node.rotation.z = 0.03 * Math.sin(t * 1.3)
-  node.rotation.y = 0.08 * Math.sin(t * 0.8)
+const applyFloat = (node, t, {speed, lift, sway}) => {
+  const k = speed / 2
+  node.position.y = lift * (1 + Math.sin(t * speed))
+  node.rotation.z = sway * 0.375 * Math.sin(t * 1.3 * k)
+  node.rotation.y = sway * Math.sin(t * 0.8 * k)
 }
 
 // 0..1, how much of the text is currently written out.
@@ -78,7 +81,8 @@ const localClip = new THREE.Plane()
 export const applyMotion = (group, now) => {
   const node = group.userData.motionNode
   const mesh = group.userData.textMesh
-  const {motion} = group.userData.options
+  const {motion, motionParams} = group.userData.options
+  const params = {...DEFAULT_PARAMS, ...motionParams}
   const t = now - group.userData.motionStart
 
   node.position.set(0, 0, 0)
@@ -86,9 +90,9 @@ export const applyMotion = (group, now) => {
   node.scale.set(1, 1, 1)
 
   if (motion === 'float') {
-    applyFloat(node, t)
+    applyFloat(node, t, params)
   } else if (motion === 'pop') {
-    applyPop(node, t)
+    applyPop(node, t, params)
   }
   if (motion !== 'draw') {
     node.scale.multiplyScalar(Math.max(0.001, easeOutBack(clamp01(t / INTRO_SECONDS))))

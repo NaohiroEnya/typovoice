@@ -1,10 +1,13 @@
 // app.js is the main entry point for TYPO VOICE: it boots the 8th Wall camera pipeline (unchanged
-// from TYPO CAM / Font Photo AR), listens for a spoken message (speech.js), and hands the
-// recognized words to the AR scene (scene.js), which floats them in front of the camera.
+// from TYPO CAM / Font Photo AR), listens for a spoken message (speech.js) while measuring how it
+// was said (voice-analyser.js), and hands the words, styled by the voice (voice-style.js), to the
+// AR scene (scene.js), which floats them in front of the camera.
 import * as THREE from 'three'
 
 import {createScenePipeline} from './scene'
 import {createSpeech} from './speech'
+import {createVoiceAnalyser, NEUTRAL_VOICE} from './voice-analyser'
+import {styleFromVoice} from './voice-style'
 
 window.THREE = THREE
 
@@ -12,14 +15,11 @@ const MAX_CHARS = 40
 const CHARS_PER_LINE = 8
 const BREAK_AFTER = /[\s、。，．,.!?！？…ー〜]/
 
-// Phase 1: every message looks the same -- plain white gothic, floating.
-const messageStyle = () => ({
-  fontId: 'gothic',
-  color: '#ffffff',
-  look: {depthRatio: 0.16, roughness: 0.45},
-  motion: 'float',
-  size: 1,
-})
+// A typed message (no voice to measure) gets a little louder with each '!'.
+const voiceFromTyping = (text) => {
+  const bangs = (text.match(/[!！]/g) || []).length
+  return {...NEUTRAL_VOICE, loudness: Math.min(1, NEUTRAL_VOICE.loudness + bangs * 0.2)}
+}
 
 // Breaks a message into short lines so it reads as a block rather than one long strip,
 // preferring to break right after punctuation or a space near the end of each line.
@@ -47,6 +47,7 @@ const caption = $('caption')
 const hint = $('hint')
 const micButton = $('mic')
 const clearButton = $('clear')
+const voiceTag = $('voice-tag')
 const typeForm = $('type-form')
 const typeInput = $('type-input')
 const toastEl = $('toast')
@@ -73,14 +74,16 @@ let placedCount = 0
 let captionTimer = null
 let speechFailed = false // an error was already reported for this attempt
 
-const showMessage = async (text) => {
+const showMessage = async (text, voice) => {
   const wrapped = wrapText(text)
   if (!wrapped) {
     caption.textContent = ''
     return
   }
+  const {label, ...style} = styleFromVoice(voice)
   caption.textContent = text
-  const placed = await scene.spawnInFront({text: wrapped, ...messageStyle()})
+  voiceTag.textContent = label || ''
+  const placed = await scene.spawnInFront({text: wrapped, ...style})
   if (!placed) {
     toast('カメラの準備ができてから、もう一度試してください')
   }
@@ -88,8 +91,16 @@ const showMessage = async (text) => {
   clearTimeout(captionTimer)
   captionTimer = setTimeout(() => {
     caption.textContent = ''
-  }, 1200)
+    voiceTag.textContent = ''
+  }, 1600)
 }
+
+const analyser = createVoiceAnalyser({
+  onLevel: (level) => micButton.style.setProperty('--level', level.toFixed(3)),
+})
+// Turned off for good if opening the mic for analysis keeps speech recognition from hearing
+// (a browser that allows only one capture at a time); messages then just use the neutral style.
+let analyserEnabled = analyser.supported
 
 const speech = createSpeech({
   onInterim: (text) => {
@@ -98,8 +109,9 @@ const speech = createSpeech({
   },
   onEnd: (text) => {
     setListening(false)
+    const voice = analyser.stop()
     if (text) {
-      showMessage(text)
+      showMessage(text, voice)
     } else {
       caption.textContent = ''
       if (!speechFailed) {
@@ -109,6 +121,11 @@ const speech = createSpeech({
   },
   onError: (error) => {
     speechFailed = true
+    if (error === 'audio-capture' && analyserEnabled) {
+      analyserEnabled = false
+      toast('もう一度話してみてください')
+      return
+    }
     toast(error === 'not-allowed' || error === 'service-not-allowed'
       ? 'マイクの使用を許可してください'
       : '音声認識が使えませんでした')
@@ -129,7 +146,11 @@ micButton.addEventListener('click', () => {
     caption.textContent = ''
     speechFailed = false
     setListening(true)
+    // Recognition first, while still inside the tap: some browsers only start it from a gesture.
     speech.start()
+    if (analyserEnabled) {
+      analyser.start()
+    }
   }
 })
 
@@ -139,7 +160,7 @@ typeForm.addEventListener('submit', (event) => {
   typeInput.value = ''
   typeForm.hidden = true
   typeInput.blur()
-  showMessage(text)
+  showMessage(text, voiceFromTyping(text))
 })
 
 clearButton.addEventListener('click', () => {

@@ -28,6 +28,7 @@ const TEXT_HALF_HEIGHT = 0.2 // half of text-plane's TEXT_WORLD_HEIGHT, at scale
 const SPAWN_DISTANCE = 1.3 // meters
 const SPAWN_MAX_WIDTH = 0.5 // a portrait phone sees ~0.7m across at SPAWN_DISTANCE
 const SPAWN_MAX_HEIGHT = 0.45
+const SPAWN_VIEW_WIDTH = 0.65
 
 const nowSeconds = () => performance.now() / 1000
 const UP = new THREE.Vector3(0, 1, 0)
@@ -275,7 +276,8 @@ export const createScenePipeline = ({
     }
     const {min, max} = mesh.geometry.boundingBox
     const fit = Math.min(1, SPAWN_MAX_WIDTH / (max.x - min.x), SPAWN_MAX_HEIGHT / (max.y - min.y))
-    const scale = Math.min(fit * options.size, MAX_SCALE)
+    // A loud voice enlarges the message, but never past the edges of a portrait view.
+    const scale = Math.min(fit * options.size, SPAWN_VIEW_WIDTH / (max.x - min.x), MAX_SCALE)
     group.userData.options = {...options, place: 'air', size: scale}
     restartMotion(group, nowSeconds())
 
