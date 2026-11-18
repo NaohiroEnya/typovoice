@@ -1,19 +1,17 @@
 // app.js is the main entry point for TYPO VOICE: it boots the 8th Wall camera pipeline (unchanged
 // from TYPO CAM / Font Photo AR), listens for a spoken message (speech.js) while measuring how it
-// was said (voice-analyser.js), and hands the words, styled by the voice (voice-style.js), to the
-// AR scene (scene.js), which floats them in front of the camera.
+// was said (voice-analyser.js). The words appear in space as they're recognized (live-text.js via
+// scene.js), and once the speaker stops they settle into one message styled by the voice
+// (voice-style.js), floating where they were spoken.
 import * as THREE from 'three'
 
 import {createScenePipeline} from './scene'
 import {createSpeech} from './speech'
 import {createVoiceAnalyser, NEUTRAL_VOICE} from './voice-analyser'
 import {styleFromVoice} from './voice-style'
+import {wrapText} from './wrap'
 
 window.THREE = THREE
-
-const MAX_CHARS = 40
-const CHARS_PER_LINE = 8
-const BREAK_AFTER = /[\s、。，．,.!?！？…ー〜]/
 
 // A typed message (no voice to measure) gets a little louder with each '!'.
 const voiceFromTyping = (text) => {
@@ -21,29 +19,9 @@ const voiceFromTyping = (text) => {
   return {...NEUTRAL_VOICE, loudness: Math.min(1, NEUTRAL_VOICE.loudness + bangs * 0.2)}
 }
 
-// Breaks a message into short lines so it reads as a block rather than one long strip,
-// preferring to break right after punctuation or a space near the end of each line.
-const wrapText = (text) => {
-  const chars = Array.from(text.replace(/\s+/g, ' ').trim()).slice(0, MAX_CHARS)
-  const lines = []
-  while (chars.length > CHARS_PER_LINE) {
-    let cut = CHARS_PER_LINE
-    for (let i = CHARS_PER_LINE; i > CHARS_PER_LINE - 3; i -= 1) {
-      if (BREAK_AFTER.test(chars[i - 1])) {
-        cut = i
-        break
-      }
-    }
-    lines.push(chars.splice(0, cut).join('').trim())
-  }
-  lines.push(chars.join('').trim())
-  return lines.filter(Boolean).join('\n')
-}
-
 // ---------- DOM ----------
 
 const $ = (id) => document.getElementById(id)
-const caption = $('caption')
 const hint = $('hint')
 const micButton = $('mic')
 const clearButton = $('clear')
@@ -71,32 +49,39 @@ const setListening = (listening) => {
 // ---------- Messages ----------
 
 let placedCount = 0
-let captionTimer = null
+let tagTimer = null
 let speechFailed = false // an error was already reported for this attempt
+let live = null // the words being spoken, shown in space as they're recognized
+let level = 0 // live input level, 0..1
 
-const showMessage = async (text, voice) => {
+// While speaking, the words are plain; the voice's style lands when the message is finished.
+const {fontId, color, look} = styleFromVoice(NEUTRAL_VOICE)
+const LIVE_STYLE = {fontId, color, look}
+
+// `pose`: where the live words were, so the finished message replaces them in place.
+const showMessage = async (text, voice, pose = null) => {
   const wrapped = wrapText(text)
   if (!wrapped) {
-    caption.textContent = ''
     return
   }
   const {label, ...style} = styleFromVoice(voice)
-  caption.textContent = text
-  voiceTag.textContent = label || ''
-  const placed = await scene.spawnInFront({text: wrapped, ...style})
+  const placed = await scene.spawnInFront({text: wrapped, ...style}, pose)
   if (!placed) {
     toast('カメラの準備ができてから、もう一度試してください')
+    return
   }
-  // The caption has done its job once the words are floating in the scene.
-  clearTimeout(captionTimer)
-  captionTimer = setTimeout(() => {
-    caption.textContent = ''
+  voiceTag.textContent = label || ''
+  clearTimeout(tagTimer)
+  tagTimer = setTimeout(() => {
     voiceTag.textContent = ''
   }, 1600)
 }
 
 const analyser = createVoiceAnalyser({
-  onLevel: (level) => micButton.style.setProperty('--level', level.toFixed(3)),
+  onLevel: (value) => {
+    level = value
+    micButton.style.setProperty('--level', value.toFixed(3))
+  },
 })
 // Turned off for good if opening the mic for analysis keeps speech recognition from hearing
 // (a browser that allows only one capture at a time); messages then just use the neutral style.
@@ -104,16 +89,21 @@ let analyserEnabled = analyser.supported
 
 const speech = createSpeech({
   onInterim: (text) => {
-    clearTimeout(captionTimer)
-    caption.textContent = text
+    if (live) {
+      live.setText(text)
+    }
   },
   onEnd: (text) => {
     setListening(false)
     const voice = analyser.stop()
+    const pose = live && live.pose
+    if (live) {
+      live.finish()
+      live = null
+    }
     if (text) {
-      showMessage(text, voice)
+      showMessage(text, voice, pose)
     } else {
-      caption.textContent = ''
       if (!speechFailed) {
         toast('うまく聞き取れませんでした')
       }
@@ -143,8 +133,9 @@ micButton.addEventListener('click', () => {
   if (speech.listening) {
     speech.stop()
   } else {
-    caption.textContent = ''
     speechFailed = false
+    voiceTag.textContent = ''
+    live = scene.startLive(LIVE_STYLE, () => level)
     setListening(true)
     // Recognition first, while still inside the tap: some browsers only start it from a gesture.
     speech.start()

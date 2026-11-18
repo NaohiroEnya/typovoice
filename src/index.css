@@ -1,10 +1,3 @@
-/* The caption previews the recognized words in the same face the 3D text uses. */
-@font-face {
-  font-family: 'TV-Gothic';
-  src: url('./assets/fonts/NotoSansJP-subset.otf') format('opentype');
-  font-display: swap;
-}
-
 :root {
   --glass-bg: rgba(18, 18, 20, 0.32);
   --glass-bg-strong: rgba(18, 18, 20, 0.55);
@@ -114,26 +107,9 @@ svg {
   pointer-events: auto;
 }
 
-#caption {
-  min-height: 1.3em;
-  max-width: calc(100% - 48px);
-  margin: 0;
-  font-family: 'TV-Gothic', sans-serif;
-  font-size: 26px;
-  font-weight: 700;
-  line-height: 1.3;
-  text-align: center;
-  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
-  transition: opacity 200ms ease;
-}
-
-#caption:empty {
-  opacity: 0;
-}
-
-/* What the voice did to the letters ("大きな声", ...), shown briefly with the caption. */
+/* What the voice did to the letters ("大きな声", ...), shown briefly once the message lands. */
 #voice-tag {
-  margin: -6px 0 0;
+  margin: 0;
   padding: 3px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.9);

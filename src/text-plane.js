@@ -10,7 +10,7 @@ import opentype from 'opentype.js'
 import {DEFAULT_FONT_ID, findFont} from './fonts'
 
 export const TEXT_WORLD_HEIGHT = 0.4 // meters, per line
-const LINE_HEIGHT = 1.25 // ems between baselines, for messages broken over several lines
+export const LINE_HEIGHT = 1.25 // ems between baselines, for messages broken over several lines
 
 // Material/extrusion defaults; a style preset's `look` overrides any of these.
 const DEFAULT_LOOK = {
@@ -122,10 +122,12 @@ const messagePath = (font, text) => {
 
 // Builds a group showing `text` as a solid, shadow-casting 3D object sized so each line's
 // world-space height is about `worldHeight` meters, in the requested font, color, and look. The
-// group is centered on
-// X/Z with its bottom at local y=0, so placing it at a ground hit point sits it directly on the
-// ground.
-export const createTextMesh = async (text, {fontId = DEFAULT_FONT_ID, worldHeight = TEXT_WORLD_HEIGHT, color = '#ff3b30', look = {}} = {}) => {
+// group is centered on X/Z with its bottom at local y=0, so placing it at a ground hit point sits
+// it directly on the ground.
+// With `baseline: true` (one line, used for the live per-character text) `worldHeight` is instead
+// meters per em, and the mesh keeps the font's own origin: x centered on the advance width, y=0 on
+// the baseline -- so characters laid out side by side line up like ordinary type.
+export const createTextMesh = async (text, {fontId = DEFAULT_FONT_ID, worldHeight = TEXT_WORLD_HEIGHT, color = '#ff3b30', look = {}, baseline = false} = {}) => {
   const font = await loadFont(fontId)
   const {scaleX} = findFont(fontId)
   const {depthRatio, roughness, metalness, emissive} = {...DEFAULT_LOOK, ...look}
@@ -139,7 +141,7 @@ export const createTextMesh = async (text, {fontId = DEFAULT_FONT_ID, worldHeigh
 
   const box = otPath.getBoundingBox()
   const lineCount = text.split('\n').length
-  const emHeight = (box.y2 - box.y1) / (1 + (lineCount - 1) * LINE_HEIGHT)
+  const emHeight = baseline ? 1 : (box.y2 - box.y1) / (1 + (lineCount - 1) * LINE_HEIGHT)
   const scale = worldHeight / emHeight
 
   const depth = emHeight * depthRatio
@@ -156,8 +158,8 @@ export const createTextMesh = async (text, {fontId = DEFAULT_FONT_ID, worldHeigh
   geometry.computeBoundingBox()
   const bounds = geometry.boundingBox
   geometry.translate(
-    -(bounds.min.x + bounds.max.x) / 2,
-    -bounds.min.y,
+    baseline ? 0 : -(bounds.min.x + bounds.max.x) / 2,
+    baseline ? 0 : -bounds.min.y,
     -(bounds.min.z + bounds.max.z) / 2
   )
 

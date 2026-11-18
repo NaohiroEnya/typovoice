@@ -1,5 +1,6 @@
-// 8th Wall XR Camera Pipeline Module, from TYPO CAM. TYPO VOICE adds spawnInFront (a spoken
-// message appears floating in front of the camera) and clearAll; the rest is unchanged.
+// 8th Wall XR Camera Pipeline Module, from TYPO CAM. TYPO VOICE adds startLive (words appear in
+// space as they're spoken, see live-text.js), spawnInFront (the finished message floats where
+// they were) and clearAll; the rest is unchanged.
 // Original description: lets the user tap to fix text in real space -- standing on
 // the ground or floating in the air (PLACE) -- drag a placed text to move it, pinch to resize it,
 // twist to rotate it, animates each text's MOTION, and grabs a still frame (or a per-frame hook,
@@ -13,6 +14,7 @@ import {RoomEnvironment} from 'three/examples/jsm/environments/RoomEnvironment.j
 import {createTextMesh} from './text-plane'
 import {prepareMotionMesh, restartMotion, applyMotion} from './motion'
 import {createPoseFilter} from './pose-filter'
+import {createLiveText} from './live-text'
 
 const SELECTION_RING_COLOR = 0xffffff
 const MIN_SCALE = 0.2
@@ -258,14 +260,58 @@ export const createScenePipeline = ({
     return point
   }
 
-  // Places a message straight ahead of the camera, centered at eye level and facing the viewer,
-  // scaled to fit SPAWN_MAX_WIDTH x SPAWN_MAX_HEIGHT and then by `options.size`. SLAM keeps it
-  // where it appeared as the viewer moves. Resolves with false if the camera isn't running yet.
-  const spawnInFront = async (options) => {
+  // Straight ahead of the camera at eye level, facing the viewer: where a message appears.
+  const spawnPose = () => {
+    const forward = new THREE.Vector3()
+    liveCamera.getWorldDirection(forward)
+    forward.y = 0
+    if (forward.lengthSq() < 1e-6) {
+      forward.set(0, 0, -1)
+    }
+    forward.normalize()
+    const position = liveCamera.getWorldPosition(new THREE.Vector3()).addScaledVector(forward, SPAWN_DISTANCE)
+    return {position, rotationY: Math.atan2(-forward.x, -forward.z)}
+  }
+
+  const liveTexts = [] // live-text.js blocks being spoken or dissolving
+  let lastUpdate = null
+
+  // Starts showing words as they're spoken; returns {pose, setText, finish} (null if the camera
+  // isn't running yet). `finish()` dissolves them; pass `pose` to spawnInFront to put the
+  // finished message in the same place.
+  const startLive = (style, getLevel) => {
+    if (!liveScene || !liveCamera) {
+      return null
+    }
+    const pose = spawnPose()
+    const live = createLiveText({style, getLevel, fit: {maxWidth: SPAWN_MAX_WIDTH, maxHeight: SPAWN_MAX_HEIGHT}})
+    live.object.position.copy(pose.position)
+    live.object.rotation.set(0, pose.rotationY, 0)
+    liveScene.add(live.object)
+    liveTexts.push(live)
+    return {pose, setText: live.setText, finish: live.dissolve}
+  }
+
+  const updateLiveTexts = (now, dt) => {
+    for (let i = liveTexts.length - 1; i >= 0; i -= 1) {
+      const live = liveTexts[i]
+      if (!live.update(now, dt)) {
+        liveScene.remove(live.object)
+        live.dispose()
+        liveTexts.splice(i, 1)
+      }
+    }
+  }
+
+  // Places a message centered on `pose` (default: straight ahead of the camera, at eye level),
+  // facing the viewer, scaled to fit SPAWN_MAX_WIDTH x SPAWN_MAX_HEIGHT and then by
+  // `options.size`. SLAM keeps it where it appeared as the viewer moves. Resolves with false if
+  // the camera isn't running yet.
+  const spawnInFront = async (options, pose = null) => {
     if (!liveScene || !liveCamera) {
       return false
     }
-    const camera = liveCamera
+    const {position, rotationY} = pose || spawnPose()
     const group = new THREE.Group()
     group.userData.motionNode = new THREE.Group()
     group.add(group.userData.motionNode)
@@ -281,18 +327,10 @@ export const createScenePipeline = ({
     group.userData.options = {...options, place: 'air', size: scale}
     restartMotion(group, nowSeconds())
 
-    const forward = new THREE.Vector3()
-    camera.getWorldDirection(forward)
-    forward.y = 0
-    if (forward.lengthSq() < 1e-6) {
-      forward.set(0, 0, -1)
-    }
-    forward.normalize()
-    const cameraPosition = camera.getWorldPosition(new THREE.Vector3())
-    group.position.copy(cameraPosition).addScaledVector(forward, SPAWN_DISTANCE)
-    group.position.y = Math.max(cameraPosition.y - ((max.y - min.y) * scale) / 2, AIR_MIN_HEIGHT)
+    group.position.copy(position)
+    group.position.y = Math.max(position.y - ((max.y - min.y) * scale) / 2, AIR_MIN_HEIGHT)
     group.scale.setScalar(scale)
-    group.rotation.set(0, Math.atan2(-forward.x, -forward.z), 0)
+    group.rotation.set(0, rotationY, 0)
     liveScene.add(group)
     placedTexts.push(group)
     onPlaced()
@@ -437,6 +475,7 @@ export const createScenePipeline = ({
 
   return {
     requestCapture,
+    startLive,
     spawnInFront,
     clearAll,
     updateSelected,
@@ -595,6 +634,8 @@ export const createScenePipeline = ({
       onUpdate: () => {
         const now = nowSeconds()
         poseFilter.apply(liveCamera, now)
+        updateLiveTexts(now, Math.min(0.1, now - (lastUpdate ?? now)))
+        lastUpdate = now
         placedTexts.forEach((group) => {
           applyMotion(group, now)
           updateContactShadow(group)

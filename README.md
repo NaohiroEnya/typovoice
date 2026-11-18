@@ -9,8 +9,8 @@
 ## 使い方
 
 1. スマホのブラウザで開く(iOS Safari / Android Chrome)。カメラとマイクを許可
-2. 下のマイクボタンをタップして話す。話している間は字幕が出る
-3. 話し終える(またはもう一度タップ)と、カメラの正面に文字が現れて浮かぶ。空間に固定されるので、周りを歩いて見られる
+2. 下のマイクボタンをタップして話す。認識された言葉が、その場でカメラの正面の空間に1文字ずつ現れていく(声が大きい瞬間の文字ほど大きく弾んで出る)
+3. 話し終える(またはもう一度タップ)と、文字が声の印象に合わせた見た目に変わって浮かぶ。空間に固定されるので、周りを歩いて見られる
 4. 文字はドラッグで移動、ピンチで拡大縮小・回転できる。右上のゴミ箱で全部消す
 
 音声認識に未対応のブラウザでは、マイクボタンで文字入力になります(「!」が多いほど大きな声扱い)。
@@ -38,11 +38,13 @@
 | --- | --- |
 | `index.html` | 8th Wall エンジン/XRExtras/LandingPage の読み込み(TYPO CAMのまま)と、マイクボタン・字幕のDOM |
 | `src/app.js` | 8th Wall パイプラインの起動(TYPO CAMのまま)、音声認識・声の解析・ARシーンの接続、メッセージの折り返し |
+| `src/live-text.js` | 話している最中の文字。1文字ずつの3Dグリフをポップさせて並べ、認識結果が書き換わったら変わった所から作り直す。話し終えると溶けて消え、完成メッセージに置き換わる |
+| `src/wrap.js` | メッセージの折り返し(ライブ表示と完成メッセージで共通) |
 | `src/speech.js` | Web Speech API(`SpeechRecognition`, `ja-JP`)で1メッセージを認識。途中経過と確定結果を返す |
 | `src/voice-analyser.js` | 認識と並行してマイクを Web Audio の AnalyserNode で解析し、大きさ・やわらかさ・抑揚(0..1)を求める |
 | `src/voice-style.js` | 声の特徴 → フォント・色・質感・サイズ・モーションのパラメータ |
-| `src/scene.js` | TYPO CAMの8th Wallカメラパイプラインモジュール。`spawnInFront`(カメラ正面に文字を出す)と`clearAll`を追加 |
-| `src/text-plane.js` | opentype.js + three.js で押し出した3D文字。改行(複数行)に対応 |
+| `src/scene.js` | TYPO CAMの8th Wallカメラパイプラインモジュール。`startLive`(話しながら文字を出す)・`spawnInFront`(カメラ正面に文字を出す)・`clearAll`を追加 |
+| `src/text-plane.js` | opentype.js + three.js で押し出した3D文字。改行(複数行)と、1文字ずつ並べるためのベースライン基準モードに対応 |
 | `src/motion.js` | FLOAT / POP など。メッセージごとの速さ・振れ幅を受け取れるようにした |
 | `src/pose-filter.js` / `run-recorder.js` / `fonts.js` | TYPO CAMのまま(録画はPhase 3で使用) |
 
