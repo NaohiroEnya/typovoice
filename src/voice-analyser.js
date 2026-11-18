@@ -1,19 +1,22 @@
 // Listens to the microphone alongside speech recognition and sums up *how* something was said:
-// how loud (loudness), how soft / breathy rather than bright and sharp (softness), and how much
-// the volume jumps around (liveliness), each 0..1. While listening, `onLevel` gets the live input
-// level (0..1) every frame for the mic button's halo.
+// how loud (loudness), how soft / breathy rather than bright and sharp (softness), how much the
+// volume jumps around (liveliness) and how sharply syllables start (attack), each 0..1, plus how
+// long the voice was actually sounding (voicedSeconds, for the speaking rate). While listening,
+// `onLevel` gets the live input level (0..1) every frame for the mic button's halo.
 const FFT_SIZE = 2048
 const GATE_DB = -52 // frames quieter than this are silence between words, not voice
 const LOUD = {min: -42, max: -14} // mean voiced level (dBFS) mapped to loudness 0..1
 const BRIGHT = {min: 900, max: 2600} // spectral centroid (Hz) mapped to softness 1..0
 const LIVELY = {min: 0.25, max: 0.9} // coefficient of variation of the voiced level -> 0..1
+const ATTACK = {min: 150, max: 600} // how fast the level climbs at syllable onsets (90th pct), dB/s
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x))
 const normalize = (x, {min, max}) => clamp01((x - min) / (max - min))
 const toDb = (rms) => 20 * Math.log10(Math.max(rms, 1e-8))
 const mean = (values) => values.reduce((a, b) => a + b, 0) / values.length
+const percentile = (values, p) => [...values].sort((a, b) => a - b)[Math.floor((values.length - 1) * p)]
 
-export const NEUTRAL_VOICE = {loudness: 0.5, softness: 0.5, liveliness: 0.5, voiced: false}
+export const NEUTRAL_VOICE = {loudness: 0.5, softness: 0.5, liveliness: 0.5, attack: 0.5, voicedSeconds: 0, voiced: false}
 
 export const createVoiceAnalyser = ({onLevel = () => {}} = {}) => {
   let context = null
@@ -43,6 +46,10 @@ export const createVoiceAnalyser = ({onLevel = () => {}} = {}) => {
         spectrum: new Float32Array(analyser.frequencyBinCount),
         levels: [], // voiced frames' RMS
         centroids: [], // voiced frames' spectral centroid, Hz
+        rises: [], // dB/s of each voiced frame where the level went up
+        voicedSeconds: 0,
+        lastDb: null,
+        lastTime: performance.now(),
         frame: 0,
       }
       tick()
@@ -67,9 +74,16 @@ export const createVoiceAnalyser = ({onLevel = () => {}} = {}) => {
     const rms = Math.sqrt(sum / s.wave.length)
     const db = toDb(rms)
     onLevel(normalize(db, {min: GATE_DB, max: LOUD.max}))
+    const now = performance.now()
+    const dt = Math.min(0.1, (now - s.lastTime) / 1000)
+    s.lastTime = now
 
     if (db > GATE_DB) {
       s.levels.push(rms)
+      s.voicedSeconds += dt
+      if (s.lastDb !== null && db > s.lastDb && dt > 0) {
+        s.rises.push((db - s.lastDb) / dt)
+      }
       s.analyser.getFloatFrequencyData(s.spectrum)
       const binHz = context.sampleRate / s.analyser.fftSize
       let weighted = 0
@@ -84,6 +98,7 @@ export const createVoiceAnalyser = ({onLevel = () => {}} = {}) => {
         s.centroids.push(weighted / total)
       }
     }
+    s.lastDb = Math.max(db, GATE_DB)
     s.frame = requestAnimationFrame(tick)
   }
 
@@ -107,6 +122,8 @@ export const createVoiceAnalyser = ({onLevel = () => {}} = {}) => {
       loudness: normalize(toDb(levelMean), LOUD),
       softness: s.centroids.length ? 1 - normalize(mean(s.centroids), BRIGHT) : 0.5,
       liveliness: normalize(levelSd / levelMean, LIVELY),
+      attack: s.rises.length ? normalize(percentile(s.rises, 0.9), ATTACK) : 0.5,
+      voicedSeconds: s.voicedSeconds,
       voiced: true,
     }
   }

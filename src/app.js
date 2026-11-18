@@ -10,6 +10,7 @@ import {createSpeech} from './speech'
 import {createVoiceAnalyser, NEUTRAL_VOICE} from './voice-analyser'
 import {styleFromVoice} from './voice-style'
 import {wrapText} from './wrap'
+import {COLORS, DEFAULT_COLOR_ID, findColor} from './colors'
 
 window.THREE = THREE
 
@@ -29,6 +30,9 @@ const voiceTag = $('voice-tag')
 const typeForm = $('type-form')
 const typeInput = $('type-input')
 const toastEl = $('toast')
+const colorButton = $('color-open')
+const colorDot = $('color-dot')
+const colorRow = $('color-row')
 
 let toastTimer = null
 const toast = (message, ms = 2400) => {
@@ -46,6 +50,74 @@ const setListening = (listening) => {
   hint.textContent = listening ? '話し終えたらもう一度タップ' : 'タップして話す'
 }
 
+// ---------- Color ----------
+
+const COLOR_KEY = 'typovoice.color'
+const loadColorId = () => {
+  try {
+    return localStorage.getItem(COLOR_KEY) || DEFAULT_COLOR_ID
+  } catch {
+    return DEFAULT_COLOR_ID
+  }
+}
+let colorId = findColor(loadColorId()).id
+let selectedMessage = null // options of the placed message the user tapped, if any
+
+COLORS.forEach(({id, label, hex}) => {
+  const swatch = document.createElement('button')
+  swatch.type = 'button'
+  swatch.className = 'swatch'
+  swatch.dataset.color = id
+  swatch.style.setProperty('--swatch', hex)
+  swatch.setAttribute('aria-label', label)
+  swatch.addEventListener('click', () => setColor(id))
+  colorRow.appendChild(swatch)
+})
+
+const renderColor = () => {
+  colorDot.style.background = findColor(colorId).hex
+  colorRow.querySelectorAll('.swatch').forEach((swatch) => {
+    swatch.setAttribute('aria-pressed', swatch.dataset.color === colorId)
+  })
+}
+
+// The chosen color is used for every new message; a selected message is recolored too.
+const setColor = (id) => {
+  colorId = id
+  try {
+    localStorage.setItem(COLOR_KEY, id)
+  } catch {
+    // private mode etc.: just not remembered
+  }
+  renderColor()
+  if (selectedMessage) {
+    selectedMessage = {...selectedMessage, color: findColor(id).hex}
+    scene.updateSelected(selectedMessage)
+  }
+}
+
+const closeColors = () => {
+  colorRow.hidden = true
+  colorButton.setAttribute('aria-expanded', 'false')
+}
+
+const openColors = () => {
+  colorRow.hidden = false
+  colorButton.setAttribute('aria-expanded', 'true')
+  const current = colorRow.querySelector(`[data-color="${colorId}"]`)
+  colorRow.scrollLeft = current.offsetLeft - (colorRow.clientWidth - current.offsetWidth) / 2
+}
+
+colorButton.addEventListener('click', () => {
+  if (colorRow.hidden) {
+    openColors()
+  } else {
+    closeColors()
+  }
+})
+
+renderColor()
+
 // ---------- Messages ----------
 
 let placedCount = 0
@@ -54,9 +126,12 @@ let speechFailed = false // an error was already reported for this attempt
 let live = null // the words being spoken, shown in space as they're recognized
 let level = 0 // live input level, 0..1
 
-// While speaking, the words are plain; the voice's style lands when the message is finished.
-const {fontId, color, look} = styleFromVoice(NEUTRAL_VOICE)
-const LIVE_STYLE = {fontId, color, look}
+// While speaking, the words are plain (in the chosen color); the voice's style lands when the
+// message is finished.
+const liveStyle = () => {
+  const {fontId, color, look} = styleFromVoice(NEUTRAL_VOICE, {color: findColor(colorId).hex})
+  return {fontId, color, look}
+}
 
 // `pose`: where the live words were, so the finished message replaces them in place.
 const showMessage = async (text, voice, pose = null) => {
@@ -64,7 +139,7 @@ const showMessage = async (text, voice, pose = null) => {
   if (!wrapped) {
     return
   }
-  const {label, ...style} = styleFromVoice(voice)
+  const {label, ...style} = styleFromVoice(voice, {text, color: findColor(colorId).hex})
   const placed = await scene.spawnInFront({text: wrapped, ...style}, pose)
   if (!placed) {
     toast('カメラの準備ができてから、もう一度試してください')
@@ -135,7 +210,8 @@ micButton.addEventListener('click', () => {
   } else {
     speechFailed = false
     voiceTag.textContent = ''
-    live = scene.startLive(LIVE_STYLE, () => level)
+    closeColors()
+    live = scene.startLive(liveStyle(), () => level)
     setListening(true)
     // Recognition first, while still inside the tap: some browsers only start it from a gesture.
     speech.start()
@@ -175,7 +251,19 @@ const scene = createScenePipeline({
     placedCount += 1
     clearButton.hidden = placedCount === 0
   },
-  onSelectionChange: () => {},
+  // Tapping a placed message selects it so the color row can recolor it (and it can be dragged /
+  // pinched like in TYPO CAM); tapping empty space deselects.
+  onSelectionChange: (options) => {
+    selectedMessage = options
+    if (options) {
+      const match = COLORS.find((c) => c.hex === options.color)
+      if (match) {
+        colorId = match.id
+        renderColor()
+      }
+      openColors()
+    }
+  },
   onScaleChange: () => {},
   onFrameRendered: () => {},
 })
