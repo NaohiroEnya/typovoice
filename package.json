@@ -1,0 +1,15 @@
+{
+  "name": "typovoice",
+  "scripts": {
+    "serve": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "opentype.js": "^2.0.0",
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "vite": "^8.0.8"
+  }
+}

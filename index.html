@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+    <title>TYPO VOICE</title>
+    <meta name="description" content="声が文字になって、空間に浮かぶ。ARボイスメッセージ">
+
+    <!-- 8th Wall, exactly as in TYPO CAM. Versions pinned exactly (not "@1") so jsdelivr never
+         needs to re-resolve against the npm registry at runtime. -->
+    <script src="https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1.0.0/dist/xr.js" async crossorigin="anonymous" data-preload-chunks="slam"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@8thwall/xrextras@1.0.0/dist/xrextras.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@8thwall/landing-page@1.0.0/dist/landing-page.js" crossorigin="anonymous"></script>
+
+    <link rel="stylesheet" href="src/index.css">
+  </head>
+  <body>
+    <!-- The main canvas used for drawing by the app; also the source frame for recordings. -->
+    <canvas id="camerafeed"></canvas>
+
+    <!-- Everything below is DOM on top of the canvas, so it never ends up in recordings. -->
+    <div id="ui">
+      <button id="clear" class="glass-button" type="button" aria-label="文字をすべて消す" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
+      </button>
+
+      <div id="voice-bar">
+        <p id="caption" aria-live="polite"></p>
+        <p id="hint">タップして話す</p>
+        <button id="mic" type="button" aria-label="話す">
+          <span id="mic-level"></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Fallback for browsers without speech recognition: type the message instead. -->
+    <form id="type-form" hidden>
+      <input id="type-input" type="text" maxlength="40" placeholder="メッセージを入力" autocomplete="off" enterkeyhint="send" aria-label="メッセージ">
+      <button type="submit" class="solid-pill">出す</button>
+    </form>
+
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+
+    <script type="module" src="src/app.js"></script>
+  </body>
+</html>
