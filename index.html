@@ -21,6 +21,8 @@
 
     <!-- Everything below is DOM on top of the canvas, so it never ends up in recordings. -->
     <div id="ui">
+      <span id="rec-badge" hidden>REC</span>
+
       <button id="clear" class="glass-button" type="button" aria-label="文字をすべて消す" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
       </button>
@@ -37,7 +39,10 @@
             <span id="mic-level"></span>
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
           </button>
-          <span class="mic-row-spacer"></span>
+          <!-- The latest recorded message; invisible (but keeping the mic centered) until there is one. -->
+          <button id="clip-open" class="glass-button is-empty" type="button" aria-label="録画したメッセージを見る">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -47,6 +52,24 @@
       <input id="type-input" type="text" maxlength="40" placeholder="メッセージを入力" autocomplete="off" enterkeyhint="send" aria-label="メッセージ">
       <button type="submit" class="solid-pill">出す</button>
     </form>
+
+    <!-- The latest recording, with ways to send it. -->
+    <div id="result" hidden>
+      <video id="result-video" playsinline loop controls></video>
+      <div id="result-actions">
+        <button id="result-send" type="button" class="solid-pill">動画を送る・保存</button>
+        <button id="result-link" type="button" class="glass-button glass-pill">リンクで送る</button>
+        <button id="result-close" type="button" class="link-button">閉じる</button>
+      </div>
+    </div>
+
+    <!-- Opened from someone's message link. -->
+    <div id="inbox" hidden>
+      <p class="inbox-title">声のメッセージが届きました</p>
+      <p id="inbox-text"></p>
+      <p id="inbox-label"></p>
+      <button id="inbox-place" type="button" class="solid-pill">空間に出す</button>
+    </div>
 
     <div id="toast" role="status" aria-live="polite" hidden></div>
 

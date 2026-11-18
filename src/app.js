@@ -2,7 +2,9 @@
 // from TYPO CAM / Font Photo AR), listens for a spoken message (speech.js) while measuring how it
 // was said (voice-analyser.js). The words appear in space as they're recognized (live-text.js via
 // scene.js), and once the speaker stops they settle into one message styled by the voice
-// (voice-style.js), floating where they were spoken.
+// (voice-style.js), floating where they were spoken. Each message is recorded as a short video
+// with the voice (run-recorder.js), which can be saved or sent along with a link that floats the
+// same message in the recipient's space (message-link.js).
 import * as THREE from 'three'
 
 import {createScenePipeline} from './scene'
@@ -11,6 +13,8 @@ import {createVoiceAnalyser, NEUTRAL_VOICE} from './voice-analyser'
 import {styleFromVoice} from './voice-style'
 import {wrapText} from './wrap'
 import {COLORS, DEFAULT_COLOR_ID, findColor} from './colors'
+import {createRunRecorder} from './run-recorder'
+import {messageToUrl, messageFromUrl, clearMessageFromUrl} from './message-link'
 
 window.THREE = THREE
 
@@ -33,6 +37,14 @@ const toastEl = $('toast')
 const colorButton = $('color-open')
 const colorDot = $('color-dot')
 const colorRow = $('color-row')
+const recBadge = $('rec-badge')
+const clipButton = $('clip-open')
+const result = $('result')
+const resultVideo = $('result-video')
+const resultSend = $('result-send')
+const resultLink = $('result-link')
+const resultClose = $('result-close')
+const inbox = $('inbox')
 
 let toastTimer = null
 const toast = (message, ms = 2400) => {
@@ -133,23 +145,202 @@ const liveStyle = () => {
   return {fontId, color, look}
 }
 
-// `pose`: where the live words were, so the finished message replaces them in place.
-const showMessage = async (text, voice, pose = null) => {
-  const wrapped = wrapText(text)
-  if (!wrapped) {
-    return
-  }
-  const {label, ...style} = styleFromVoice(voice, {text, color: findColor(colorId).hex})
-  const placed = await scene.spawnInFront({text: wrapped, ...style}, pose)
-  if (!placed) {
-    toast('カメラの準備ができてから、もう一度試してください')
-    return
-  }
+const flashTag = (label) => {
   voiceTag.textContent = label || ''
   clearTimeout(tagTimer)
   tagTimer = setTimeout(() => {
     voiceTag.textContent = ''
   }, 1600)
+}
+
+// `pose`: where the live words were, so the finished message replaces them in place. Resolves
+// with the placed message's options (for its recording and link), or null.
+const showMessage = async (text, voice, pose = null) => {
+  const wrapped = wrapText(text)
+  if (!wrapped) {
+    return null
+  }
+  const message = {text: wrapped, ...styleFromVoice(voice, {text, color: findColor(colorId).hex})}
+  const placed = await scene.spawnInFront(message, pose)
+  if (!placed) {
+    toast('カメラの準備ができてから、もう一度試してください')
+    return null
+  }
+  flashTag(message.label)
+  return message
+}
+
+// ---------- Recording (Phase 3) ----------
+
+// Each message is recorded from the moment the mic is tapped -- voice, words popping in, the
+// styled message landing -- until it has floated for TAIL_SECONDS more.
+const TAIL_SECONDS = 2.5
+const MAX_CLIP_SECONDS = 30
+
+// A small signature in the corner of every video, so a forwarded clip says where it came from.
+const drawWatermark = (ctx, scale) => {
+  const size = Math.round(13 * scale)
+  ctx.save()
+  ctx.font = `700 ${size}px -apple-system, 'Hiragino Sans', sans-serif`
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.4)'
+  ctx.shadowBlur = 4 * scale
+  ctx.textBaseline = 'bottom'
+  ctx.fillText('TYPO VOICE', 14 * scale, ctx.canvas.height - 14 * scale)
+  ctx.restore()
+}
+
+const recorder = createRunRecorder({
+  getSourceCanvas: () => document.getElementById('camerafeed'),
+  drawOverlay: drawWatermark,
+  filePrefix: 'typovoice',
+})
+let take = null // the recording in progress: {timer, message (once it has landed)}
+let clip = null // the latest finished recording: {file, message, url}
+
+const startTake = (audioStream = null) => {
+  recorder.start({audioStream})
+  if (!recorder.recording) {
+    return
+  }
+  recBadge.hidden = false
+  take = {timer: setTimeout(() => endTake(null), MAX_CLIP_SECONDS * 1000)}
+}
+
+// Stops the recording; with a message, keeps it as the latest clip, otherwise throws it away.
+const endTake = async (message) => {
+  if (!take) {
+    return
+  }
+  clearTimeout(take.timer)
+  take = null
+  recBadge.hidden = true
+  if (!message) {
+    recorder.discard()
+    return
+  }
+  const file = await recorder.finish()
+  if (file) {
+    setClip({file, message})
+  }
+}
+
+// Lets the message float a little longer on camera, then stops.
+const endTakeAfterTail = (message) => {
+  if (take) {
+    clearTimeout(take.timer)
+    take.message = message
+    take.timer = setTimeout(() => endTake(message), TAIL_SECONDS * 1000)
+  }
+}
+
+const setClip = (next) => {
+  if (clip) {
+    URL.revokeObjectURL(clip.url)
+  }
+  clip = {...next, url: URL.createObjectURL(next.file)}
+  clipButton.classList.remove('is-empty')
+  clipButton.classList.remove('is-new')
+  void clipButton.offsetWidth // restart the "new clip" bounce
+  clipButton.classList.add('is-new')
+}
+
+// ---------- Sending (Phase 4) ----------
+
+const canShareFile = (file) => !!(navigator.canShare && navigator.canShare({files: [file]}))
+
+const openResult = () => {
+  if (!clip) {
+    return
+  }
+  closeColors()
+  resultSend.textContent = canShareFile(clip.file) ? '動画を送る・保存' : '動画を保存'
+  resultVideo.src = clip.url
+  result.hidden = false
+  // Opened by a tap, so playing with sound is allowed; fall back to muted if it isn't.
+  resultVideo.muted = false
+  resultVideo.play().catch(() => {
+    resultVideo.muted = true
+    resultVideo.play().catch(() => {})
+  })
+}
+
+const closeResult = () => {
+  resultVideo.pause()
+  result.hidden = true
+}
+
+const download = (file) => {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(file)
+  a.download = file.name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+}
+
+// The video, through the share sheet where files can be shared (iOS: LINE, Messages, "Save
+// Video"...), otherwise downloaded.
+const sendVideo = async () => {
+  const {file} = clip
+  if (canShareFile(file)) {
+    try {
+      await navigator.share({files: [file], title: 'TYPO VOICE'})
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        download(file)
+      }
+    }
+    return
+  }
+  download(file)
+  toast('動画を保存しました')
+}
+
+// A link that floats the same message in the recipient's own space.
+const sendLink = async () => {
+  const url = messageToUrl(clip.message)
+  const text = `「${clip.message.text.replace(/\n/g, '')}」 声のメッセージが届いています`
+  if (navigator.share) {
+    try {
+      await navigator.share({title: 'TYPO VOICE', text, url})
+      return
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        return
+      }
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    toast('リンクをコピーしました')
+  } catch {
+    window.prompt('このリンクをコピーして送ってください', url)
+  }
+}
+
+clipButton.addEventListener('click', openResult)
+resultClose.addEventListener('click', closeResult)
+resultSend.addEventListener('click', sendVideo)
+resultLink.addEventListener('click', sendLink)
+
+// Opened from someone's link: show what arrived, and float it here on a tap.
+const received = messageFromUrl()
+if (received) {
+  $('inbox-text').textContent = received.text.replace(/\n/g, '')
+  $('inbox-label').textContent = received.label
+  inbox.hidden = false
+  $('inbox-place').addEventListener('click', async () => {
+    const placed = await scene.spawnInFront(received)
+    if (!placed) {
+      toast('カメラの準備ができてから、もう一度タップしてください')
+      return
+    }
+    inbox.hidden = true
+    clearMessageFromUrl()
+    flashTag(received.label)
+  })
 }
 
 const analyser = createVoiceAnalyser({
@@ -168,7 +359,7 @@ const speech = createSpeech({
       live.setText(text)
     }
   },
-  onEnd: (text) => {
+  onEnd: async (text) => {
     setListening(false)
     const voice = analyser.stop()
     const pose = live && live.pose
@@ -177,8 +368,14 @@ const speech = createSpeech({
       live = null
     }
     if (text) {
-      showMessage(text, voice, pose)
+      const message = await showMessage(text, voice, pose)
+      if (message) {
+        endTakeAfterTail(message)
+      } else {
+        endTake(null)
+      }
     } else {
+      endTake(null)
       if (!speechFailed) {
         toast('うまく聞き取れませんでした')
       }
@@ -211,12 +408,23 @@ micButton.addEventListener('click', () => {
     speechFailed = false
     voiceTag.textContent = ''
     closeColors()
+    if (take) {
+      endTake(take.message) // the previous message's tail: keep what was recorded so far
+    }
     live = scene.startLive(liveStyle(), () => level)
     setListening(true)
     // Recognition first, while still inside the tap: some browsers only start it from a gesture.
     speech.start()
     if (analyserEnabled) {
-      analyser.start()
+      // The recording gets its own copy of the mic, since the analyser lets go of it as soon as
+      // the speaker stops while the recording runs on through the tail.
+      analyser.start().then((stream) => {
+        if (speech.listening) {
+          startTake(stream && new MediaStream(stream.getAudioTracks().map((track) => track.clone())))
+        }
+      })
+    } else {
+      startTake()
     }
   }
 })
@@ -227,7 +435,17 @@ typeForm.addEventListener('submit', (event) => {
   typeInput.value = ''
   typeForm.hidden = true
   typeInput.blur()
-  showMessage(text, voiceFromTyping(text))
+  if (take) {
+    endTake(take.message)
+  }
+  startTake()
+  showMessage(text, voiceFromTyping(text)).then((message) => {
+    if (message) {
+      endTakeAfterTail(message)
+    } else {
+      endTake(null)
+    }
+  })
 })
 
 clearButton.addEventListener('click', () => {
@@ -265,7 +483,7 @@ const scene = createScenePipeline({
     }
   },
   onScaleChange: () => {},
-  onFrameRendered: () => {},
+  onFrameRendered: () => recorder.captureFrame(),
 })
 
 const onxrloaded = () => {
